@@ -13,7 +13,23 @@ Renommer le fichier .streamlit/secrets.example.toml (ou similaire) en .streamlit
 Remplacer la valeur de la clé API par votre propre clé.
 
 ### Pour lancer l'app : 
-- Créer un environnement virtuel python : ``` python -m venv venv ```
-- Activer l'env : Mac ``` source venv/bin/activate ``` Win ``` venv\Scripts\activate ```
-- Installer les dependances : ``` pip install -r requirements.txt ```
-- lancer l'app : ``` streamlit run main.py ```
+- Créer un environnement virtuel python 
+```bash
+  python -m venv venv 
+```
+
+- Activer l'env 
+```bash
+Mac : source venv/bin/activate 
+Windows : venv\Scripts\activate 
+```
+
+- Installer les dependances
+```bash
+ pip install -r requirements.txt 
+ ```
+ 
+- lancer l'app  
+```bash
+streamlit run main.py 
+```
