@@ -1,13 +1,27 @@
 import streamlit as st
 import PyPDF2
 import requests
+from utils import DatabaseManager, format_log_entry
+from config import Config
+import uuid
 
 st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_allow_html=True)
 
 hide_menu_style = """<style>#MainMenu {visibility: hidden;}</style>"""
 st.markdown(hide_menu_style, unsafe_allow_html=True)
 
-HF_API_KEY = st.secrets["huggingface"]["api_key"]
+HF_API_KEY = Config.get_huggingface_api_key()
+
+# Initialiser la connexion à la base de données
+@st.cache_resource
+def get_database():
+    return DatabaseManager()
+
+db = get_database()
+
+# Générer un ID de session unique
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 def summarize_with_huggingface(text):
     import time
@@ -90,7 +104,69 @@ if "summaries" not in st.session_state:
 if "file_texts" not in st.session_state:
     st.session_state["file_texts"] = {}
 
+# Charger les données de session depuis la base de données
+if "session_loaded" not in st.session_state:
+    saved_data = db.load_session_data(st.session_state.session_id)
+    if saved_data:
+        st.session_state["file_texts"] = saved_data.get("file_texts", {})
+        st.session_state["summaries"] = saved_data.get("summaries", [])
+        st.session_state["current_summaries"] = saved_data.get("current_summaries", "")
+        st.session_state["messages"] = saved_data.get("messages", [])
+        st.session_state["session_loaded"] = True
+        db.log_activity("session_restored", {
+            "session_id": st.session_state.session_id,
+            "files_count": len(st.session_state["file_texts"])
+        })
+    else:
+        st.session_state["session_loaded"] = True
+
 st.title("Analyse des fichiers")
+
+# Sidebar pour les logs et la gestion de session
+with st.sidebar:
+    st.header("📊 Logs et Session")
+    
+    # Bouton pour afficher les logs
+    if st.button("📋 Afficher les logs récents"):
+        logs = db.get_recent_logs(Config.LOG_DISPLAY_LIMIT)
+        if logs:
+            st.subheader("Logs récents:")
+            for log in logs:
+                st.text(format_log_entry(log))
+        else:
+            st.info("Aucun log disponible")
+    
+    # Informations de session
+    st.subheader("Session actuelle:")
+    st.text(f"ID: {st.session_state.session_id[:8]}...")
+    st.text(f"Fichiers: {len(st.session_state['file_texts'])}")
+    
+    # Bouton pour sauvegarder manuellement
+    if st.button("💾 Sauvegarder session"):
+        session_data = {
+            "file_texts": st.session_state["file_texts"],
+            "summaries": st.session_state["summaries"],
+            "current_summaries": st.session_state.get("current_summaries", ""),
+            "messages": st.session_state.get("messages", [])
+        }
+        db.save_session_data(st.session_state.session_id, session_data)
+        db.log_activity("manual_save", {
+            "session_id": st.session_state.session_id,
+            "files_count": len(st.session_state["file_texts"])
+        })
+        st.success("Session sauvegardée!")
+    
+    # Bouton pour effacer la session
+    if st.button("🗑️ Effacer session"):
+        st.session_state["file_texts"] = {}
+        st.session_state["summaries"] = []
+        st.session_state["current_summaries"] = ""
+        st.session_state["messages"] = []
+        db.log_activity("session_cleared", {
+            "session_id": st.session_state.session_id
+        })
+        st.success("Session effacée!")
+        st.rerun()
 
 uploaded_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
 
@@ -108,6 +184,23 @@ if uploaded_files:
                 "num_pages": len(pdf_reader.pages),
                 "num_words": len(text.split())
             }
+            
+            # Logger l'ajout du fichier
+            db.log_activity("file_uploaded", {
+                "filename": uploaded_file.name,
+                "pages": len(pdf_reader.pages),
+                "words": len(text.split()),
+                "session_id": st.session_state.session_id
+            })
+            
+            # Sauvegarder automatiquement la session
+            session_data = {
+                "file_texts": st.session_state["file_texts"],
+                "summaries": st.session_state["summaries"],
+                "current_summaries": st.session_state.get("current_summaries", ""),
+                "messages": st.session_state.get("messages", [])
+            }
+            db.save_session_data(st.session_state.session_id, session_data)
 
     # Affichage des analyses
     for file_name, data in st.session_state["file_texts"].items():
@@ -125,9 +218,24 @@ if uploaded_files:
         with st.spinner("Génération des résumés en cours..."):
             summaries = []
             for file_name, data in st.session_state["file_texts"].items():
-                summary = summarize_with_huggingface(data["text"][:3000])
+                summary = summarize_with_huggingface(data["text"][:Config.MAX_TEXT_LENGTH])
                 summaries.append(f"**{file_name}** : {summary}")
             st.session_state["current_summaries"] = "\n\n".join(summaries)
+            
+            # Logger la génération de résumés
+            db.log_activity("summaries_generated", {
+                "files_count": len(st.session_state["file_texts"]),
+                "session_id": st.session_state.session_id
+            })
+            
+            # Sauvegarder la session
+            session_data = {
+                "file_texts": st.session_state["file_texts"],
+                "summaries": st.session_state["summaries"],
+                "current_summaries": st.session_state["current_summaries"],
+                "messages": st.session_state.get("messages", [])
+            }
+            db.save_session_data(st.session_state.session_id, session_data)
 
     if st.session_state["current_summaries"]:
         st.subheader("Résumé :")
@@ -157,5 +265,30 @@ if user_question:
             st.session_state.messages.append({"role": "assistant", "content": answer})
             with st.chat_message("assistant"):
                 st.markdown(answer)
+            
+            # Logger la question posée
+            db.log_activity("question_asked", {
+                "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
+                "files_count": len(st.session_state["file_texts"]),
+                "session_id": st.session_state.session_id
+            })
+            
+            # Sauvegarder la session avec les nouveaux messages
+            session_data = {
+                "file_texts": st.session_state["file_texts"],
+                "summaries": st.session_state["summaries"],
+                "current_summaries": st.session_state.get("current_summaries", ""),
+                "messages": st.session_state.messages
+            }
+            db.save_session_data(st.session_state.session_id, session_data)
+            
         except Exception as e:
             st.error(f"Une erreur s'est produite : {e}")
+            db.log_activity("error_occurred", {
+                "error": str(e),
+                "session_id": st.session_state.session_id
+            })
+
+# Nettoyage à la fin de l'application
+import atexit
+atexit.register(db.close_connection)
