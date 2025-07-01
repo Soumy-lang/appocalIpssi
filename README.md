@@ -31,6 +31,7 @@ pip install -r requirements.txt
 1. Renommez `env_example.txt` en `.env`
 2. Modifiez le fichier `.env` avec vos informations :
 
+<<<<<<< HEAD
 ```env
 # Configuration OpenAI
 OPENAI_API_KEY=votre_clé_api_openai_ici
@@ -110,3 +111,26 @@ Pour toute question ou problème, consultez la documentation de :
 - [Streamlit](https://docs.streamlit.io/)
 - [MongoDB Atlas](https://docs.atlas.mongodb.com/)
 - [OpenAI API](https://platform.openai.com/docs/)
+=======
+### Pour lancer l'app : 
+- Créer un environnement virtuel python 
+```bash
+  python -m venv venv 
+```
+
+- Activer l'env 
+```bash
+Mac : source venv/bin/activate 
+Windows : venv\Scripts\activate 
+```
+
+- Installer les dependances
+```bash
+ pip install -r requirements.txt 
+ ```
+ 
+- lancer l'app  
+```bash
+streamlit run main.py 
+```
+>>>>>>> 83b677f0b34e628928b2ed35efeada2f9a8408ee
