@@ -6,6 +6,7 @@ class Config:
     MONGODB_DB_NAME = "apocalipssi_db"
     MONGODB_LOGS_COLLECTION = "activity_logs"
     MONGODB_SESSIONS_COLLECTION = "sessions"
+    MONGODB_USERS_COLLECTION = "users"
     
     # Paramètres de logging
     MAX_LOG_ENTRIES = 50
@@ -17,6 +18,10 @@ class Config:
     # Paramètres d'API
     MAX_TEXT_LENGTH = 3000
     MAX_QUESTION_LENGTH = 100
+    
+    # Paramètres d'authentification
+    MIN_PASSWORD_LENGTH = 6
+    SESSION_TIMEOUT = 24  # heures
     
     # Paramètres d'interface
     SIDEBAR_TITLE = "📊 Logs et Session"
