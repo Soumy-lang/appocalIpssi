@@ -19,6 +19,10 @@ class Config:
     MAX_TEXT_LENGTH = 3000
     MAX_QUESTION_LENGTH = 100
     
+    # Paramètres d'authentification
+    MIN_PASSWORD_LENGTH = 6
+    SESSION_TIMEOUT = 24  # heures
+    
     # Paramètres d'interface
     SIDEBAR_TITLE = "📊 Logs et Session"
     MAIN_TITLE = "Analyse des fichiers"
