@@ -1,3 +1,32 @@
+# Fichiers secrets Streamlit
 .streamlit/secrets.toml
+.streamlit/secrets_tpl.toml
+
+# Fichiers de configuration locaux
+.env
+*.env
+
+# Dossiers d'environnement virtuel
+.venv/
+venv/
+ENV/
+
+# Fichiers temporaires Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Fichiers temporaires divers
+*.log
+*.sqlite3
+
+# Dossiers de cache
+.cache/
+.ipynb_checkpoints/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
 users.yml
-/venv
