@@ -14,6 +14,7 @@ class DatabaseManager:
         """Établit la connexion à MongoDB"""
         try:
             self.client = pymongo.MongoClient(self.connection_string)
+
             self.db = self.client.apocalipssi_db
             # Test de connexion
             self.client.admin.command('ping')
@@ -46,6 +47,7 @@ class DatabaseManager:
         try:
             if self.db is not None:
                 logs = list(self.db.activity_logs.find().sort("timestamp", -1).limit(limit))
+
                 return logs
             else:
                 return []
@@ -80,6 +82,7 @@ class DatabaseManager:
     
     def close_connection(self):
         """Ferme la connexion MongoDB"""
+
         if self.client is not None:
             self.client.close()
             print("Connexion MongoDB fermée")

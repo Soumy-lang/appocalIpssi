@@ -2,6 +2,7 @@ import streamlit as st
 import PyPDF2
 import requests
 from utils import DatabaseManager, format_log_entry
+from config import Config
 import uuid
 
 st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_allow_html=True)
@@ -9,7 +10,18 @@ st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_
 hide_menu_style = """<style>#MainMenu {visibility: hidden;}</style>"""
 st.markdown(hide_menu_style, unsafe_allow_html=True)
 
-HF_API_KEY = st.secrets["huggingface"]["api_key"]
+HF_API_KEY = Config.get_huggingface_api_key()
+
+# Initialiser la connexion à la base de données
+@st.cache_resource
+def get_database():
+    return DatabaseManager()
+
+db = get_database()
+
+# Générer un ID de session unique
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 # Initialiser la connexion à la base de données
 @st.cache_resource
@@ -132,7 +144,10 @@ with st.sidebar:
     
     # Bouton pour afficher les logs
     if st.button("📋 Afficher les logs récents"):
+
         logs = db.get_recent_logs(20)
+        # logs = db.get_recent_logs(Config.LOG_DISPLAY_LIMIT)
+
         if logs:
             st.subheader("Logs récents:")
             for log in logs:
@@ -173,6 +188,8 @@ with st.sidebar:
         st.rerun()
 
 uploaded_files = st.file_uploader("Télécharger vos fichiers PDF", type="pdf", accept_multiple_files=True)
+# uploaded_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
+
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
@@ -222,7 +239,7 @@ if uploaded_files:
         with st.spinner("Génération des résumés en cours..."):
             summaries = []
             for file_name, data in st.session_state["file_texts"].items():
-                summary = summarize_with_huggingface(data["text"][:3000])
+                summary = summarize_with_huggingface(data["text"][:Config.MAX_TEXT_LENGTH])
                 summaries.append(f"**{file_name}** : {summary}")
             st.session_state["current_summaries"] = "\n\n".join(summaries)
             
@@ -271,7 +288,9 @@ if user_question:
             
             # Logger la question posée
             db.log_activity("question_asked", {
+
                 "question": user_question[:100],  # Limiter la longueur
+                # "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
                 "files_count": len(st.session_state["file_texts"]),
                 "session_id": st.session_state.session_id
             })
