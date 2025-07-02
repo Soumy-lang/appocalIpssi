@@ -2,11 +2,10 @@ import pymongo
 from datetime import datetime
 import streamlit as st
 from typing import Dict, Any, List
-from config import Config
 
 class DatabaseManager:
     def __init__(self):
-        self.connection_string = Config.get_mongodb_connection_string()
+        self.connection_string = st.secrets["mongodb"]["connection_string"]
         self.client = None
         self.db = None
         self.connect()
@@ -15,7 +14,8 @@ class DatabaseManager:
         """Établit la connexion à MongoDB"""
         try:
             self.client = pymongo.MongoClient(self.connection_string)
-            self.db = self.client[Config.MONGODB_DB_NAME]
+
+            self.db = self.client.apocalipssi_db
             # Test de connexion
             self.client.admin.command('ping')
             print("Connexion MongoDB réussie")
@@ -33,8 +33,8 @@ class DatabaseManager:
                 "details": details
             }
             
-            if self.db:
-                self.db[Config.MONGODB_LOGS_COLLECTION].insert_one(log_entry)
+            if self.db is not None:
+                self.db.activity_logs.insert_one(log_entry)
                 print(f"Log enregistré: {activity_type}")
             else:
                 print("Base de données non connectée")
@@ -42,11 +42,12 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erreur lors de l'enregistrement du log: {e}")
     
-    def get_recent_logs(self, limit: int = Config.MAX_LOG_ENTRIES) -> List[Dict]:
+    def get_recent_logs(self, limit: int = 50) -> List[Dict]:
         """Récupère les logs récents"""
         try:
-            if self.db:
-                logs = list(self.db[Config.MONGODB_LOGS_COLLECTION].find().sort("timestamp", -1).limit(limit))
+            if self.db is not None:
+                logs = list(self.db.activity_logs.find().sort("timestamp", -1).limit(limit))
+
                 return logs
             else:
                 return []
@@ -57,8 +58,8 @@ class DatabaseManager:
     def save_session_data(self, session_id: str, data: Dict[str, Any]):
         """Sauvegarde les données de session"""
         try:
-            if self.db:
-                self.db[Config.MONGODB_SESSIONS_COLLECTION].update_one(
+            if self.db is not None:
+                self.db.sessions.update_one(
                     {"session_id": session_id},
                     {"$set": {"data": data, "last_updated": datetime.now()}},
                     upsert=True
@@ -70,8 +71,8 @@ class DatabaseManager:
     def load_session_data(self, session_id: str) -> Dict[str, Any]:
         """Charge les données de session"""
         try:
-            if self.db:
-                session = self.db[Config.MONGODB_SESSIONS_COLLECTION].find_one({"session_id": session_id})
+            if self.db is not None:
+                session = self.db.sessions.find_one({"session_id": session_id})
                 if session:
                     return session.get("data", {})
             return {}
@@ -81,7 +82,8 @@ class DatabaseManager:
     
     def close_connection(self):
         """Ferme la connexion MongoDB"""
-        if self.client:
+
+        if self.client is not None:
             self.client.close()
             print("Connexion MongoDB fermée")
 

@@ -23,6 +23,17 @@ db = get_database()
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
+# Initialiser la connexion à la base de données
+@st.cache_resource
+def get_database():
+    return DatabaseManager()
+
+db = get_database()
+
+# Générer un ID de session unique
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
 def summarize_with_huggingface(text):
     import time
 
@@ -39,14 +50,18 @@ def summarize_with_huggingface(text):
             time.sleep(10) 
             return "Le modèle n'est pas encore prêt. Réessaie dans quelques secondes."
 
+        # Gestion spécifique de l'erreur 504 (Gateway Timeout)
+        if response.status_code == 504:
+            return "Le service Hugging Face est temporairement surchargé. Veuillez réessayer dans quelques minutes."
+
         if response.status_code != 200:
-            return f"Erreur Hugging Face : {response.status_code} - {response.text}"
+            return f"Erreur Hugging Face : {response.status_code} - Service temporairement indisponible"
 
         result = response.json()
         if isinstance(result, list) and "summary_text" in result[0]:
             return result[0]["summary_text"]
         else:
-            return f"Réponse inattendue : {result}"
+            return f"Réponse inattendue du service"
 
     except Exception as e:
         return f"Erreur lors du résumé : {e}"
@@ -80,20 +95,21 @@ def ask_question_with_huggingface(question, context):
     try:
         response = requests.post(api_url, headers=headers, json=payload)
         
-        # Log la réponse brute (utile en debug)
-        print("Réponse Hugging Face brut:", response.text)
+        # Gestion spécifique de l'erreur 504 (Gateway Timeout)
+        if response.status_code == 504:
+            return "Le service Hugging Face est temporairement surchargé. Veuillez réessayer dans quelques minutes."
 
         if response.status_code == 503:
             return "Le modèle est en train de se charger. Réessaye dans quelques secondes."
 
         if response.status_code != 200:
-            return f"Erreur API Hugging Face : {response.status_code} - {response.text}"
+            return f"Erreur API Hugging Face : {response.status_code} - Service temporairement indisponible"
 
         result = response.json()
         if isinstance(result, list) and "generated_text" in result[0]:
             return result[0]["generated_text"]
         else:
-            return f"Réponse inattendue : {result}"
+            return f"Réponse inattendue du service"
 
     except Exception as e:
         return f"Erreur lors de la réponse : {e}"
@@ -128,7 +144,10 @@ with st.sidebar:
     
     # Bouton pour afficher les logs
     if st.button("📋 Afficher les logs récents"):
-        logs = db.get_recent_logs(Config.LOG_DISPLAY_LIMIT)
+
+        logs = db.get_recent_logs(20)
+        # logs = db.get_recent_logs(Config.LOG_DISPLAY_LIMIT)
+
         if logs:
             st.subheader("Logs récents:")
             for log in logs:
@@ -168,7 +187,9 @@ with st.sidebar:
         st.success("Session effacée!")
         st.rerun()
 
-uploaded_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
+uploaded_files = st.file_uploader("Télécharger vos fichiers PDF", type="pdf", accept_multiple_files=True)
+# uploaded_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
+
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
@@ -241,7 +262,6 @@ if uploaded_files:
         st.subheader("Résumé :")
         st.write(st.session_state["current_summaries"])
 
-
 # Posez des questions sur les fichiers PDF
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -268,7 +288,9 @@ if user_question:
             
             # Logger la question posée
             db.log_activity("question_asked", {
-                "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
+
+                "question": user_question[:100],  # Limiter la longueur
+                # "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
                 "files_count": len(st.session_state["file_texts"]),
                 "session_id": st.session_state.session_id
             })
