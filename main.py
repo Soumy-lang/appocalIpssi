@@ -1,6 +1,8 @@
 import streamlit as st
 import PyPDF2
 import requests
+from utils import DatabaseManager, format_log_entry
+import uuid
 
 st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_allow_html=True)
 
@@ -8,6 +10,17 @@ hide_menu_style = """<style>#MainMenu {visibility: hidden;}</style>"""
 st.markdown(hide_menu_style, unsafe_allow_html=True)
 
 HF_API_KEY = st.secrets["huggingface"]["api_key"]
+
+# Initialiser la connexion à la base de données
+@st.cache_resource
+def get_database():
+    return DatabaseManager()
+
+db = get_database()
+
+# Générer un ID de session unique
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 def summarize_with_huggingface(text):
     import time
@@ -25,14 +38,18 @@ def summarize_with_huggingface(text):
             time.sleep(10) 
             return "Le modèle n'est pas encore prêt. Réessaie dans quelques secondes."
 
+        # Gestion spécifique de l'erreur 504 (Gateway Timeout)
+        if response.status_code == 504:
+            return "Le service Hugging Face est temporairement surchargé. Veuillez réessayer dans quelques minutes."
+
         if response.status_code != 200:
-            return f"Erreur Hugging Face : {response.status_code} - {response.text}"
+            return f"Erreur Hugging Face : {response.status_code} - Service temporairement indisponible"
 
         result = response.json()
         if isinstance(result, list) and "summary_text" in result[0]:
             return result[0]["summary_text"]
         else:
-            return f"Réponse inattendue : {result}"
+            return f"Réponse inattendue du service"
 
     except Exception as e:
         return f"Erreur lors du résumé : {e}"
@@ -66,20 +83,21 @@ def ask_question_with_huggingface(question, context):
     try:
         response = requests.post(api_url, headers=headers, json=payload)
         
-        # Log la réponse brute (utile en debug)
-        print("Réponse Hugging Face brut:", response.text)
+        # Gestion spécifique de l'erreur 504 (Gateway Timeout)
+        if response.status_code == 504:
+            return "Le service Hugging Face est temporairement surchargé. Veuillez réessayer dans quelques minutes."
 
         if response.status_code == 503:
             return "Le modèle est en train de se charger. Réessaye dans quelques secondes."
 
         if response.status_code != 200:
-            return f"Erreur API Hugging Face : {response.status_code} - {response.text}"
+            return f"Erreur API Hugging Face : {response.status_code} - Service temporairement indisponible"
 
         result = response.json()
         if isinstance(result, list) and "generated_text" in result[0]:
             return result[0]["generated_text"]
         else:
-            return f"Réponse inattendue : {result}"
+            return f"Réponse inattendue du service"
 
     except Exception as e:
         return f"Erreur lors de la réponse : {e}"
@@ -90,9 +108,71 @@ if "summaries" not in st.session_state:
 if "file_texts" not in st.session_state:
     st.session_state["file_texts"] = {}
 
+# Charger les données de session depuis la base de données
+if "session_loaded" not in st.session_state:
+    saved_data = db.load_session_data(st.session_state.session_id)
+    if saved_data:
+        st.session_state["file_texts"] = saved_data.get("file_texts", {})
+        st.session_state["summaries"] = saved_data.get("summaries", [])
+        st.session_state["current_summaries"] = saved_data.get("current_summaries", "")
+        st.session_state["messages"] = saved_data.get("messages", [])
+        st.session_state["session_loaded"] = True
+        db.log_activity("session_restored", {
+            "session_id": st.session_state.session_id,
+            "files_count": len(st.session_state["file_texts"])
+        })
+    else:
+        st.session_state["session_loaded"] = True
+
 st.title("Analyse des fichiers")
 
-uploaded_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
+# Sidebar pour les logs et la gestion de session
+with st.sidebar:
+    st.header("📊 Logs et Session")
+    
+    # Bouton pour afficher les logs
+    if st.button("📋 Afficher les logs récents"):
+        logs = db.get_recent_logs(20)
+        if logs:
+            st.subheader("Logs récents:")
+            for log in logs:
+                st.text(format_log_entry(log))
+        else:
+            st.info("Aucun log disponible")
+    
+    # Informations de session
+    st.subheader("Session actuelle:")
+    st.text(f"ID: {st.session_state.session_id[:8]}...")
+    st.text(f"Fichiers: {len(st.session_state['file_texts'])}")
+    
+    # Bouton pour sauvegarder manuellement
+    if st.button("💾 Sauvegarder session"):
+        session_data = {
+            "file_texts": st.session_state["file_texts"],
+            "summaries": st.session_state["summaries"],
+            "current_summaries": st.session_state.get("current_summaries", ""),
+            "messages": st.session_state.get("messages", [])
+        }
+        db.save_session_data(st.session_state.session_id, session_data)
+        db.log_activity("manual_save", {
+            "session_id": st.session_state.session_id,
+            "files_count": len(st.session_state["file_texts"])
+        })
+        st.success("Session sauvegardée!")
+    
+    # Bouton pour effacer la session
+    if st.button("🗑️ Effacer session"):
+        st.session_state["file_texts"] = {}
+        st.session_state["summaries"] = []
+        st.session_state["current_summaries"] = ""
+        st.session_state["messages"] = []
+        db.log_activity("session_cleared", {
+            "session_id": st.session_state.session_id
+        })
+        st.success("Session effacée!")
+        st.rerun()
+
+uploaded_files = st.file_uploader("Télécharger vos fichiers PDF", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
@@ -108,6 +188,23 @@ if uploaded_files:
                 "num_pages": len(pdf_reader.pages),
                 "num_words": len(text.split())
             }
+            
+            # Logger l'ajout du fichier
+            db.log_activity("file_uploaded", {
+                "filename": uploaded_file.name,
+                "pages": len(pdf_reader.pages),
+                "words": len(text.split()),
+                "session_id": st.session_state.session_id
+            })
+            
+            # Sauvegarder automatiquement la session
+            session_data = {
+                "file_texts": st.session_state["file_texts"],
+                "summaries": st.session_state["summaries"],
+                "current_summaries": st.session_state.get("current_summaries", ""),
+                "messages": st.session_state.get("messages", [])
+            }
+            db.save_session_data(st.session_state.session_id, session_data)
 
     # Affichage des analyses
     for file_name, data in st.session_state["file_texts"].items():
@@ -128,11 +225,25 @@ if uploaded_files:
                 summary = summarize_with_huggingface(data["text"][:3000])
                 summaries.append(f"**{file_name}** : {summary}")
             st.session_state["current_summaries"] = "\n\n".join(summaries)
+            
+            # Logger la génération de résumés
+            db.log_activity("summaries_generated", {
+                "files_count": len(st.session_state["file_texts"]),
+                "session_id": st.session_state.session_id
+            })
+            
+            # Sauvegarder la session
+            session_data = {
+                "file_texts": st.session_state["file_texts"],
+                "summaries": st.session_state["summaries"],
+                "current_summaries": st.session_state["current_summaries"],
+                "messages": st.session_state.get("messages", [])
+            }
+            db.save_session_data(st.session_state.session_id, session_data)
 
     if st.session_state["current_summaries"]:
         st.subheader("Résumé :")
         st.write(st.session_state["current_summaries"])
-
 
 # Posez des questions sur les fichiers PDF
 if "messages" not in st.session_state:
@@ -157,5 +268,30 @@ if user_question:
             st.session_state.messages.append({"role": "assistant", "content": answer})
             with st.chat_message("assistant"):
                 st.markdown(answer)
+            
+            # Logger la question posée
+            db.log_activity("question_asked", {
+                "question": user_question[:100],  # Limiter la longueur
+                "files_count": len(st.session_state["file_texts"]),
+                "session_id": st.session_state.session_id
+            })
+            
+            # Sauvegarder la session avec les nouveaux messages
+            session_data = {
+                "file_texts": st.session_state["file_texts"],
+                "summaries": st.session_state["summaries"],
+                "current_summaries": st.session_state.get("current_summaries", ""),
+                "messages": st.session_state.messages
+            }
+            db.save_session_data(st.session_state.session_id, session_data)
+            
         except Exception as e:
             st.error(f"Une erreur s'est produite : {e}")
+            db.log_activity("error_occurred", {
+                "error": str(e),
+                "session_id": st.session_state.session_id
+            })
+
+# Nettoyage à la fin de l'application
+import atexit
+atexit.register(db.close_connection)
