@@ -4,6 +4,8 @@ import requests
 from utils import DatabaseManager, format_log_entry
 from config import Config
 import uuid
+import hashlib
+import re
 
 st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_allow_html=True)
 
@@ -18,6 +20,200 @@ def get_database():
     return DatabaseManager()
 
 db = get_database()
+
+# Initialiser les états d'authentification
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+if "show_register" not in st.session_state:
+    st.session_state.show_register = False
+
+def hash_password(password):
+    """Hash le mot de passe avec SHA-256"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def validate_email(email):
+    """Valide le format de l'email"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def validate_password(password):
+    """Valide la force du mot de passe"""
+    if len(password) < 8:
+        return False, "Le mot de passe doit contenir au moins 8 caractères"
+    if not re.search(r'[A-Z]', password):
+        return False, "Le mot de passe doit contenir au moins une majuscule"
+    if not re.search(r'[a-z]', password):
+        return False, "Le mot de passe doit contenir au moins une minuscule"
+    if not re.search(r'\d', password):
+        return False, "Le mot de passe doit contenir au moins un chiffre"
+    return True, "Mot de passe valide"
+
+def register_user(email, password, confirm_password, full_name):
+    """Enregistre un nouvel utilisateur"""
+    try:
+        # Validation des champs
+        if not email or not password or not confirm_password or not full_name:
+            return False, "Tous les champs sont obligatoires"
+        
+        if not validate_email(email):
+            return False, "Format d'email invalide"
+        
+        is_valid, message = validate_password(password)
+        if not is_valid:
+            return False, message
+        
+        if password != confirm_password:
+            return False, "Les mots de passe ne correspondent pas"
+        
+        # Vérifier si l'utilisateur existe déjà
+        existing_user = db.get_user_by_email(email)
+        if existing_user:
+            return False, "Un utilisateur avec cet email existe déjà"
+        
+        # Créer le nouvel utilisateur
+        hashed_password = hash_password(password)
+        user_data = {
+            "email": email,
+            "password": hashed_password,
+            "full_name": full_name,
+            "created_at": db.get_current_timestamp(),
+            "last_login": None
+        }
+        
+        success = db.create_user(user_data)
+        if success:
+            return True, "Inscription réussie ! Vous pouvez maintenant vous connecter."
+        else:
+            return False, "Erreur lors de l'inscription. Veuillez réessayer."
+            
+    except Exception as e:
+        return False, f"Erreur lors de l'inscription : {str(e)}"
+
+def login_user(email, password):
+    """Connecte un utilisateur"""
+    try:
+        if not email or not password:
+            return False, "Email et mot de passe requis"
+        
+        # Récupérer l'utilisateur
+        user = db.get_user_by_email(email)
+        if not user:
+            return False, "Email ou mot de passe incorrect"
+        
+        # Vérifier le mot de passe
+        hashed_password = hash_password(password)
+        if user["password"] != hashed_password:
+            return False, "Email ou mot de passe incorrect"
+        
+        # Mettre à jour la dernière connexion
+        db.update_last_login(user["_id"])
+        
+        return True, "Connexion réussie !"
+        
+    except Exception as e:
+        return False, f"Erreur lors de la connexion : {str(e)}"
+
+def show_auth_page():
+    """Affiche la page d'authentification"""
+    # CSS pour améliorer l'apparence
+    st.markdown("""
+    <style>
+    .auth-container {
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    .auth-title {
+        text-align: center;
+        color: #1f77b4;
+        margin-bottom: 30px;
+    }
+    .success-message {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 10px 0;
+        text-align: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="auth-container">', unsafe_allow_html=True)
+    st.markdown('<h1 class="auth-title">🔐 Authentification APOCALIPSSI</h1>', unsafe_allow_html=True)
+    
+    # Onglets pour connexion/inscription
+    tab1, tab2 = st.tabs(["Connexion", "Inscription"])
+    
+    with tab1:
+        st.subheader("Se connecter")
+        with st.form("login_form"):
+            login_email = st.text_input("📧 Email", key="login_email", placeholder="votre@email.com")
+            login_password = st.text_input("🔒 Mot de passe", type="password", key="login_password", placeholder="Votre mot de passe")
+            login_submitted = st.form_submit_button("🚀 Se connecter", use_container_width=True)
+            
+            if login_submitted:
+                success, message = login_user(login_email, login_password)
+                if success:
+                    st.session_state.authenticated = True
+                    st.session_state.current_user = db.get_user_by_email(login_email)
+                    st.markdown(f'<div class="success-message">✅ {message}</div>', unsafe_allow_html=True)
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
+    
+    with tab2:
+        st.subheader("S'inscrire")
+        with st.form("register_form"):
+            reg_full_name = st.text_input("👤 Nom complet", key="reg_full_name", placeholder="Votre nom complet")
+            reg_email = st.text_input("📧 Email", key="reg_email", placeholder="votre@email.com")
+            reg_password = st.text_input("🔒 Mot de passe", type="password", key="reg_password", placeholder="Min. 8 caractères, majuscule, minuscule, chiffre")
+            reg_confirm_password = st.text_input("🔒 Confirmer le mot de passe", type="password", key="reg_confirm_password", placeholder="Confirmez votre mot de passe")
+            
+            # Afficher les exigences du mot de passe
+            st.info("💡 Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule et un chiffre.")
+            
+            reg_submitted = st.form_submit_button("📝 S'inscrire", use_container_width=True)
+            
+            if reg_submitted:
+                success, message = register_user(reg_email, reg_password, reg_confirm_password, reg_full_name)
+                if success:
+                    st.markdown(f'<div class="success-message">✅ {message}</div>', unsafe_allow_html=True)
+                    st.balloons()
+                    # Redirection automatique vers l'onglet connexion après 3 secondes
+                    st.info("🔄 Redirection automatique vers la page de connexion dans 3 secondes...")
+                    import time
+                    time.sleep(3)
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def show_logout_button():
+    """Affiche le bouton de déconnexion dans la sidebar"""
+    with st.sidebar:
+        st.divider()
+        if st.button("🚪 Se déconnecter"):
+            st.session_state.authenticated = False
+            st.session_state.current_user = None
+            st.session_state.file_texts = {}
+            st.session_state.summaries = []
+            st.session_state.current_summaries = ""
+            st.session_state.messages = []
+            st.rerun()
+
+# Vérifier l'authentification
+if not st.session_state.authenticated:
+    show_auth_page()
+    st.stop()
+
+# Afficher les informations de l'utilisateur connecté
+st.sidebar.success(f"👤 Connecté : {st.session_state.current_user['full_name']}")
+show_logout_button()
 
 # Générer un ID de session unique
 if "session_id" not in st.session_state:
@@ -132,7 +328,7 @@ if "session_loaded" not in st.session_state:
         db.log_activity("session_restored", {
             "session_id": st.session_state.session_id,
             "files_count": len(st.session_state["file_texts"])
-        })
+        }, st.session_state.current_user["email"])
     else:
         st.session_state["session_loaded"] = True
 
@@ -172,7 +368,7 @@ with st.sidebar:
         db.log_activity("manual_save", {
             "session_id": st.session_state.session_id,
             "files_count": len(st.session_state["file_texts"])
-        })
+        }, st.session_state.current_user["email"])
         st.success("Session sauvegardée!")
     
     # Bouton pour effacer la session
@@ -183,7 +379,7 @@ with st.sidebar:
         st.session_state["messages"] = []
         db.log_activity("session_cleared", {
             "session_id": st.session_state.session_id
-        })
+        }, st.session_state.current_user["email"])
         st.success("Session effacée!")
         st.rerun()
 
@@ -212,7 +408,7 @@ if uploaded_files:
                 "pages": len(pdf_reader.pages),
                 "words": len(text.split()),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.current_user["email"])
             
             # Sauvegarder automatiquement la session
             session_data = {
@@ -247,7 +443,7 @@ if uploaded_files:
             db.log_activity("summaries_generated", {
                 "files_count": len(st.session_state["file_texts"]),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.current_user["email"])
             
             # Sauvegarder la session
             session_data = {
@@ -288,12 +484,11 @@ if user_question:
             
             # Logger la question posée
             db.log_activity("question_asked", {
-
                 "question": user_question[:100],  # Limiter la longueur
                 # "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
                 "files_count": len(st.session_state["file_texts"]),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.current_user["email"])
             
             # Sauvegarder la session avec les nouveaux messages
             session_data = {
@@ -309,7 +504,7 @@ if user_question:
             db.log_activity("error_occurred", {
                 "error": str(e),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.current_user["email"])
 
 # Nettoyage à la fin de l'application
 import atexit
