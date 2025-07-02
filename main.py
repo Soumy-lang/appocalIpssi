@@ -2,11 +2,16 @@ import streamlit as st
 import PyPDF2
 import requests
 from utils import DatabaseManager, format_log_entry
+from auth import AuthManager, show_auth_page
 from config import Config
+from style_utils import apply_custom_styles
 import uuid
 
-st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_allow_html=True)
+# Appliquer les styles CSS personnalisés
+apply_custom_styles()
 
+# Masquer les éléments Streamlit par défaut
+st.markdown(r"""<style>.stDeployButton {visibility: hidden;}</style>""", unsafe_allow_html=True)
 hide_menu_style = """<style>#MainMenu {visibility: hidden;}</style>"""
 st.markdown(hide_menu_style, unsafe_allow_html=True)
 
@@ -18,6 +23,13 @@ def get_database():
     return DatabaseManager()
 
 db = get_database()
+
+# Initialiser le gestionnaire d'authentification
+auth_manager = AuthManager(db)
+
+# Vérifier l'authentification
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
 # Générer un ID de session unique
 if "session_id" not in st.session_state:
@@ -120,6 +132,19 @@ if "summaries" not in st.session_state:
 if "file_texts" not in st.session_state:
     st.session_state["file_texts"] = {}
 
+# Vérifier si l'utilisateur est authentifié
+if not st.session_state.authenticated:
+    # Titre de l'application sur la page d'authentification
+    st.markdown("""
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <h1 style="color: #667eea; font-size: 3rem; margin-bottom: 0.5rem;">📄 APOCALIPSSI</h1>
+        <p style="color: #6c757d; font-size: 1.2rem; margin: 0;">Analyse Intelligente de Documents PDF</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    show_auth_page(auth_manager)
+    st.stop()
+
 # Charger les données de session depuis la base de données
 if "session_loaded" not in st.session_state:
     saved_data = db.load_session_data(st.session_state.session_id)
@@ -132,60 +157,73 @@ if "session_loaded" not in st.session_state:
         db.log_activity("session_restored", {
             "session_id": st.session_state.session_id,
             "files_count": len(st.session_state["file_texts"])
-        })
+        }, st.session_state.get("user_id", "default"))
     else:
         st.session_state["session_loaded"] = True
 
-st.title("Analyse des fichiers")
+# Header avec informations utilisateur et bouton de déconnexion
+st.markdown('<div class="main-header">', unsafe_allow_html=True)
+col1, col2, col3 = st.columns([3, 1, 1])
+with col1:
+    st.markdown('<h1>📄 APOCALIPSSI - Analyse des fichiers</h1>', unsafe_allow_html=True)
+with col2:
+    if "user" in st.session_state:
+        st.markdown(f'<div class="user-info">👤 <strong>{st.session_state.user["username"]}</strong></div>', unsafe_allow_html=True)
+with col3:
+    if st.button("🚪 Déconnexion", key="logout_btn"):
+        auth_manager.logout_user()
+        st.success("Déconnexion réussie !")
+        st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
 # Sidebar pour les logs et la gestion de session
 with st.sidebar:
-    st.header("📊 Logs et Session")
+    st.markdown('<div class="sidebar">', unsafe_allow_html=True)
+    st.markdown('<h3>📊 Logs et Session</h3>', unsafe_allow_html=True)
     
     # Bouton pour afficher les logs
-    if st.button("📋 Afficher les logs récents"):
-
-        logs = db.get_recent_logs(20)
-        # logs = db.get_recent_logs(Config.LOG_DISPLAY_LIMIT)
+    if st.button("📋 Afficher les logs récents", key="show_logs_btn"):
+        user_id = st.session_state.get("user_id", "default")
+        logs = db.get_recent_logs(Config.LOG_DISPLAY_LIMIT, user_id)
 
         if logs:
-            st.subheader("Logs récents:")
+            st.markdown('<h4>Logs récents:</h4>', unsafe_allow_html=True)
             for log in logs:
-                st.text(format_log_entry(log))
+                st.markdown(f'<div class="log-entry">{format_log_entry(log)}</div>', unsafe_allow_html=True)
         else:
             st.info("Aucun log disponible")
     
     # Informations de session
-    st.subheader("Session actuelle:")
-    st.text(f"ID: {st.session_state.session_id[:8]}...")
-    st.text(f"Fichiers: {len(st.session_state['file_texts'])}")
+    st.markdown('<h4>Session actuelle:</h4>', unsafe_allow_html=True)
+    st.markdown(f'<div class="session-info">ID: {st.session_state.session_id[:8]}...<br>Fichiers: {len(st.session_state["file_texts"])}</div>', unsafe_allow_html=True)
     
     # Bouton pour sauvegarder manuellement
-    if st.button("💾 Sauvegarder session"):
+    if st.button("💾 Sauvegarder session", key="save_session_btn"):
         session_data = {
             "file_texts": st.session_state["file_texts"],
             "summaries": st.session_state["summaries"],
             "current_summaries": st.session_state.get("current_summaries", ""),
             "messages": st.session_state.get("messages", [])
         }
-        db.save_session_data(st.session_state.session_id, session_data)
+        db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
         db.log_activity("manual_save", {
             "session_id": st.session_state.session_id,
             "files_count": len(st.session_state["file_texts"])
-        })
+        }, st.session_state.get("user_id", "default"))
         st.success("Session sauvegardée!")
     
     # Bouton pour effacer la session
-    if st.button("🗑️ Effacer session"):
+    if st.button("🗑️ Effacer session", key="clear_session_btn"):
         st.session_state["file_texts"] = {}
         st.session_state["summaries"] = []
         st.session_state["current_summaries"] = ""
         st.session_state["messages"] = []
         db.log_activity("session_cleared", {
             "session_id": st.session_state.session_id
-        })
+        }, st.session_state.get("user_id", "default"))
         st.success("Session effacée!")
         st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 uploaded_files = st.file_uploader("Télécharger vos fichiers PDF", type="pdf", accept_multiple_files=True)
 # uploaded_files = st.file_uploader("", type="pdf", accept_multiple_files=True)
@@ -212,7 +250,7 @@ if uploaded_files:
                 "pages": len(pdf_reader.pages),
                 "words": len(text.split()),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.get("user_id", "default"))
             
             # Sauvegarder automatiquement la session
             session_data = {
@@ -221,21 +259,25 @@ if uploaded_files:
                 "current_summaries": st.session_state.get("current_summaries", ""),
                 "messages": st.session_state.get("messages", [])
             }
-            db.save_session_data(st.session_state.session_id, session_data)
+            db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
 
     # Affichage des analyses
     for file_name, data in st.session_state["file_texts"].items():
-        with st.expander(f"{file_name}"):
-            st.write(f"**Nombre de pages :** {data['num_pages']}")
-            st.write(f"**Nombre total de mots :** {data['num_words']}")
+        st.markdown('<div class="file-card">', unsafe_allow_html=True)
+        with st.expander(f"📄 {file_name}"):
+            st.markdown('<div class="file-stats">', unsafe_allow_html=True)
+            st.markdown(f'<div class="stat-item">📖 Pages: {data["num_pages"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="stat-item">📝 Mots: {data["num_words"]}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             st.text_area(f"Contenu brut de {file_name}", data['text'], height=200)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # Initialiser les résumés actifs dans l'état de session
     if "current_summaries" not in st.session_state:
         st.session_state["current_summaries"] = ""
 
     # Bouton pour générer un résumé pour tous les fichiers
-    if st.button("Résumer les documents"):
+    if st.button("📝 Résumer les documents", key="summarize_btn"):
         with st.spinner("Génération des résumés en cours..."):
             summaries = []
             for file_name, data in st.session_state["file_texts"].items():
@@ -247,7 +289,7 @@ if uploaded_files:
             db.log_activity("summaries_generated", {
                 "files_count": len(st.session_state["file_texts"]),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.get("user_id", "default"))
             
             # Sauvegarder la session
             session_data = {
@@ -256,25 +298,29 @@ if uploaded_files:
                 "current_summaries": st.session_state["current_summaries"],
                 "messages": st.session_state.get("messages", [])
             }
-            db.save_session_data(st.session_state.session_id, session_data)
+            db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
 
     if st.session_state["current_summaries"]:
-        st.subheader("Résumé :")
+        st.markdown('<div class="summary-container">', unsafe_allow_html=True)
+        st.markdown('<h3>📋 Résumé des documents</h3>', unsafe_allow_html=True)
         st.write(st.session_state["current_summaries"])
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # Posez des questions sur les fichiers PDF
+st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+st.markdown("""<h3>💬 Chat avec l'IA</h3>""", unsafe_allow_html=True)
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    role_class = "user" if message["role"] == "user" else "assistant"
+    st.markdown(f'<div class="chat-message {role_class}">{message["content"]}</div>', unsafe_allow_html=True)
 
-user_question = st.chat_input("Votre question")
+user_question = st.chat_input("Posez votre question sur les documents...")
 if user_question:
     st.session_state.messages.append({"role": "user", "content": user_question})
-    with st.chat_message("user"):
-        st.markdown(user_question)
+    st.markdown(f'<div class="chat-message user">{user_question}</div>', unsafe_allow_html=True)
 
     with st.spinner("L'IA réfléchit à votre question..."):
         try:
@@ -283,17 +329,14 @@ if user_question:
             )
             answer = ask_question_with_huggingface(user_question, combined_texts)
             st.session_state.messages.append({"role": "assistant", "content": answer})
-            with st.chat_message("assistant"):
-                st.markdown(answer)
+            st.markdown(f'<div class="chat-message assistant">{answer}</div>', unsafe_allow_html=True)
             
             # Logger la question posée
             db.log_activity("question_asked", {
-
-                "question": user_question[:100],  # Limiter la longueur
-                # "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
+                "question": user_question[:Config.MAX_QUESTION_LENGTH],  # Limiter la longueur
                 "files_count": len(st.session_state["file_texts"]),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.get("user_id", "default"))
             
             # Sauvegarder la session avec les nouveaux messages
             session_data = {
@@ -302,14 +345,16 @@ if user_question:
                 "current_summaries": st.session_state.get("current_summaries", ""),
                 "messages": st.session_state.messages
             }
-            db.save_session_data(st.session_state.session_id, session_data)
+            db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
             
         except Exception as e:
             st.error(f"Une erreur s'est produite : {e}")
             db.log_activity("error_occurred", {
                 "error": str(e),
                 "session_id": st.session_state.session_id
-            })
+            }, st.session_state.get("user_id", "default"))
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 # Nettoyage à la fin de l'application
 import atexit

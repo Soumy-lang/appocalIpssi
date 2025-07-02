@@ -35,19 +35,23 @@ class DatabaseManager:
             
             if self.db is not None:
                 self.db.activity_logs.insert_one(log_entry)
-                print(f"Log enregistré: {activity_type}")
+                print(f"Log enregistré: {activity_type} pour utilisateur {user_id}")
             else:
                 print("Base de données non connectée")
                 
         except Exception as e:
             print(f"Erreur lors de l'enregistrement du log: {e}")
     
-    def get_recent_logs(self, limit: int = 50) -> List[Dict]:
+    def get_recent_logs(self, limit: int = 50, user_id: str = None) -> List[Dict]:
         """Récupère les logs récents"""
         try:
             if self.db is not None:
-                logs = list(self.db.activity_logs.find().sort("timestamp", -1).limit(limit))
-
+                if user_id:
+                    # Logs pour un utilisateur spécifique
+                    logs = list(self.db.activity_logs.find({"user_id": user_id}).sort("timestamp", -1).limit(limit))
+                else:
+                    # Tous les logs
+                    logs = list(self.db.activity_logs.find().sort("timestamp", -1).limit(limit))
                 return logs
             else:
                 return []
@@ -55,16 +59,20 @@ class DatabaseManager:
             print(f"Erreur lors de la récupération des logs: {e}")
             return []
     
-    def save_session_data(self, session_id: str, data: Dict[str, Any]):
+    def save_session_data(self, session_id: str, data: Dict[str, Any], user_id: str = "default"):
         """Sauvegarde les données de session"""
         try:
             if self.db is not None:
                 self.db.sessions.update_one(
                     {"session_id": session_id},
-                    {"$set": {"data": data, "last_updated": datetime.now()}},
+                    {"$set": {
+                        "data": data, 
+                        "user_id": user_id,
+                        "last_updated": datetime.now()
+                    }},
                     upsert=True
                 )
-                print(f"Session sauvegardée: {session_id}")
+                print(f"Session sauvegardée: {session_id} pour utilisateur {user_id}")
         except Exception as e:
             print(f"Erreur lors de la sauvegarde de session: {e}")
     
