@@ -23,6 +23,51 @@ class DatabaseManager:
             print(f"Erreur de connexion MongoDB: {e}")
             st.error(f"Erreur de connexion à la base de données: {e}")
     
+    def get_current_timestamp(self):
+        """Retourne le timestamp actuel"""
+        return datetime.now()
+    
+    def create_user(self, user_data: Dict[str, Any]) -> bool:
+        """Crée un nouvel utilisateur"""
+        try:
+            if self.db is not None:
+                result = self.db.users.insert_one(user_data)
+                print(f"Utilisateur créé avec l'ID: {result.inserted_id}")
+                return True
+            else:
+                print("Base de données non connectée")
+                return False
+        except Exception as e:
+            print(f"Erreur lors de la création de l'utilisateur: {e}")
+            return False
+    
+    def get_user_by_email(self, email: str) -> Dict[str, Any]:
+        """Récupère un utilisateur par son email"""
+        try:
+            if self.db is not None:
+                user = self.db.users.find_one({"email": email})
+                return user
+            else:
+                return None
+        except Exception as e:
+            print(f"Erreur lors de la récupération de l'utilisateur: {e}")
+            return None
+    
+    def update_last_login(self, user_id) -> bool:
+        """Met à jour la dernière connexion d'un utilisateur"""
+        try:
+            if self.db is not None:
+                result = self.db.users.update_one(
+                    {"_id": user_id},
+                    {"$set": {"last_login": self.get_current_timestamp()}}
+                )
+                return result.modified_count > 0
+            else:
+                return False
+        except Exception as e:
+            print(f"Erreur lors de la mise à jour de la dernière connexion: {e}")
+            return False
+    
     def log_activity(self, activity_type: str, details: Dict[str, Any], user_id: str = "default"):
         """Enregistre une activité dans la base de données"""
         try:

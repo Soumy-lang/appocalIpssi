@@ -27,6 +27,15 @@ class Config:
     SIDEBAR_TITLE = "📊 Logs et Session"
     MAIN_TITLE = "Analyse des fichiers"
     
+    # Paramètres d'authentification
+    MIN_PASSWORD_LENGTH = 8
+    PASSWORD_REQUIREMENTS = {
+        "min_length": 8,
+        "require_uppercase": True,
+        "require_lowercase": True,
+        "require_digit": True
+    }
+    
     @staticmethod
     def get_mongodb_connection_string():
         """Récupère la chaîne de connexion MongoDB depuis les secrets"""
