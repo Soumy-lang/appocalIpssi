@@ -340,7 +340,7 @@ if not st.session_state.authenticated:
     </div>
     """, unsafe_allow_html=True)
     
-    show_auth_page(auth_manager)
+    show_auth_page()
     st.stop()
 
 # Charger les données de session depuis la base de données
@@ -462,7 +462,7 @@ if uploaded_files:
                 "current_summaries": st.session_state.get("current_summaries", ""),
                 "messages": st.session_state.get("messages", [])
             }
-            db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
+            db.save_session_data(st.session_state.session_id, session_data, st.session_state.current_user["email"])
 
     # Affichage des analyses
     for file_name, data in st.session_state["file_texts"].items():
@@ -502,7 +502,7 @@ if uploaded_files:
                 "current_summaries": st.session_state["current_summaries"],
                 "messages": st.session_state.get("messages", [])
             }
-            db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
+            db.save_session_data(st.session_state.session_id, session_data, st.session_state.current_user["email"])
 
     if st.session_state["current_summaries"]:
         st.markdown('<div class="summary-container">', unsafe_allow_html=True)
@@ -557,7 +557,7 @@ if user_question:
                 "current_summaries": st.session_state.get("current_summaries", ""),
                 "messages": st.session_state.messages
             }
-            db.save_session_data(st.session_state.session_id, session_data, st.session_state.get("user_id", "default"))
+            db.save_session_data(st.session_state.session_id, session_data, st.session_state.current_user["email"])
             
         except Exception as e:
             st.error(f"Une erreur s'est produite : {e}")
